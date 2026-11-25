@@ -145,3 +145,32 @@ h1{background:linear-gradient(180deg,#fff6cf 0%,var(--gold) 45%,var(--gold2) 100
 @keyframes shake{20%,60%{transform:translateX(-10px)}40%,80%{transform:translateX(10px)}}
 .soundbtn{min-width:48px}
 @media(prefers-reduced-motion:reduce){.marquee,.multbig,.timer.hot,.jackbanner,.nick,.overlay,.mobmult .multbig{animation:none!important}}
+/* ===== Úvodní obrazovka ===== */
+.welcome-mode .host-top{display:none}
+.welcome{min-height:calc(100svh - 64px);display:grid;justify-items:center;align-content:center;gap:clamp(14px,2.2vh,26px);text-align:center;padding:10px 0 30px}
+.neon{font:700 clamp(54px,8.5vw,120px)/.95 'Libre Baskerville',Georgia,serif;color:#fff;letter-spacing:.01em;text-shadow:0 0 6px #fff,0 0 18px var(--neon),0 0 38px var(--neon),0 0 80px #ff0066;animation:flicker 4s infinite}
+@keyframes flicker{0%,18%,22%,62%,64%,100%{opacity:1}20%,63%{opacity:.55}}
+.slot{width:min(380px,70vw);height:auto;filter:drop-shadow(0 18px 40px rgba(255,61,139,.35)) drop-shadow(0 0 30px rgba(255,190,0,.25))}
+.slot .bulbs circle{animation:bulb 1s steps(1) infinite}
+.slot .bulbs circle:nth-child(odd){animation-delay:.5s}
+@keyframes bulb{50%{fill:#ff3d8b}}
+.slot .lever{transform-origin:357px 150px;animation:pull 3.2s ease-in-out infinite}
+@keyframes pull{0%,70%,100%{transform:rotate(0)}78%{transform:rotate(28deg)}}
+.slot .reels text{animation:reel 3.2s ease-in-out infinite}
+@keyframes reel{70%,100%{opacity:1}74%,90%{opacity:.25}}
+.tagline{font-size:clamp(18px,1.8vw,26px);color:#ffe9a8;margin:0;max-width:30em}
+.facts{display:flex;flex-wrap:wrap;justify-content:center;gap:14px}
+.fact{min-width:9.5em;padding:14px 22px;border-radius:18px;background:linear-gradient(180deg,#24113a,#140a22);border:2px solid rgba(255,210,74,.55);box-shadow:0 0 24px rgba(255,190,0,.15) inset}
+.fact b{display:block;font:700 clamp(30px,3.4vw,48px)/1.05 'Libre Baskerville',Georgia,serif;background:linear-gradient(180deg,#fff6cf,var(--gold) 50%,var(--gold2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.fact span{color:var(--soft);font-weight:700;font-size:15px;text-transform:uppercase;letter-spacing:.08em}
+.fact.hot{border-color:var(--neon);box-shadow:0 0 30px rgba(255,61,139,.45)}
+.fact.hot b{background:linear-gradient(180deg,#ffe0f0,var(--neon));-webkit-background-clip:text;background-clip:text}
+.primary.huge{font-size:clamp(22px,2.4vw,32px);padding:18px 54px;border-radius:999px;animation:beckon 1.6s ease-in-out infinite}
+@keyframes beckon{50%{box-shadow:0 4px 0 #a86b00,0 0 50px rgba(255,190,0,.8)}}
+.admin{margin-top:6px;color:var(--soft);font-size:15px;max-width:760px;width:100%;text-align:left}
+.admin summary{cursor:pointer;text-align:center;opacity:.55}
+.admin summary:hover{opacity:1}
+/* lobby */
+.qrbox{background:linear-gradient(180deg,#fff6cf,#ffd24a);border:6px solid #8a5200;box-shadow:0 0 0 4px var(--gold),0 0 60px rgba(255,190,0,.45)}
+.qrbox::before{content:"Naskenuj a vstup do herny";font:700 22px 'Libre Baskerville',Georgia,serif;color:#2a1600}
+@media(prefers-reduced-motion:reduce){.neon,.slot *,.primary.huge{animation:none!important}}

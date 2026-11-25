@@ -60,6 +60,30 @@ function phaseEffects() {
   if (state.phase === "final") { sfx.fanfare(); coinRain(90); }
 }
 
+const SLOT_SVG = `<svg class="slot" viewBox="0 0 420 300" role="img" aria-label="Výherní automat" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff3b0"/><stop offset=".5" stop-color="#ffd24a"/><stop offset="1" stop-color="#b07800"/></linearGradient>
+    <linearGradient id="sb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d0103a"/><stop offset="1" stop-color="#5a0a20"/></linearGradient>
+    <linearGradient id="sr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cfcfcf"/><stop offset=".5" stop-color="#ffffff"/><stop offset="1" stop-color="#cfcfcf"/></linearGradient>
+  </defs>
+  <rect x="40" y="20" width="300" height="270" rx="30" fill="url(#sg)"/>
+  <rect x="52" y="32" width="276" height="246" rx="22" fill="url(#sb)"/>
+  <rect x="80" y="44" width="220" height="34" rx="17" fill="#2a0716" stroke="url(#sg)" stroke-width="3"/>
+  <text x="190" y="68" text-anchor="middle" font-family="Libre Baskerville, Georgia, serif" font-weight="700" font-size="20" fill="#ffd24a">JACKPOT</text>
+  <g class="bulbs">${Array.from({ length: 9 }, (_, i) => `<circle cx="${76 + i * 28.5}" cy="98" r="6" fill="#fff7c2"/>`).join("")}</g>
+  <rect x="70" y="114" width="240" height="100" rx="14" fill="#1a0610" stroke="url(#sg)" stroke-width="4"/>
+  ${[0, 1, 2].map((i) => `<rect x="${80 + i * 77}" y="122" width="66" height="84" rx="8" fill="url(#sr)"/>`).join("")}
+  <g class="reels" font-family="Libre Baskerville, Georgia, serif" font-weight="700" text-anchor="middle">
+    <text x="113" y="177" font-size="30" fill="#b3001b">×2</text>
+    <text x="190" y="177" font-size="30" fill="#b07800">×4</text>
+    <text x="267" y="177" font-size="26" fill="#b3001b">×10</text>
+  </g>
+  <rect x="96" y="230" width="188" height="36" rx="10" fill="#2a0716"/>
+  <rect x="108" y="240" width="164" height="16" rx="8" fill="#000" opacity=".6"/>
+  <rect x="342" y="120" width="16" height="80" rx="8" fill="url(#sg)"/>
+  <g class="lever"><rect x="352" y="40" width="10" height="110" rx="5" fill="#cfcfcf"/><circle cx="357" cy="38" r="20" fill="#e0102f"/><circle cx="351" cy="32" r="6" fill="#ff8a9a"/></g>
+</svg>`;
+
 const app = document.getElementById("app");
 const info = document.getElementById("info");
 const tools = document.getElementById("tools");
@@ -91,22 +115,37 @@ async function setup(msg = "") {
     if (s && s.exists()) linkedQ = JSON.stringify(s.val(), null, 1);
   }
   if (linkedQ) draftQ = linkedQ;
-  app.innerHTML = `<div class="card" style="max-width:900px;display:grid;gap:16px">
-    <h2 style="font-size:26px">Nová hra</h2>
-    <p class="muted">Otázky se nenahrávají na web, aby je hráči nemohli najít ve zdrojovém kódu. Vlož obsah souboru <b>otazky.json</b> nebo ho vyber tlačítkem.</p>
-    <input type="file" id="file" accept=".json,application/json">
-    <textarea id="qs" spellcheck="false" placeholder='{"questions":[{"q":"…","options":["…","…"],"correct":0,"mult":1.5}]}'>${esc(draftQ)}</textarea>
-    <div class="row">
-      <label class="row" for="minBet">Minimální sázka <input id="minBet" type="number" min="1" step="10" value="50" style="width:120px"></label>
-      <label class="row" for="dur">Čas na otázku (s) <input id="dur" type="number" min="10" step="5" value="30" style="width:120px"></label>
+  document.body.classList.add("welcome-mode");
+  let nQ = 0, maxM = 0;
+  try { const l = parseQuestions(draftQ); nQ = l.length; maxM = Math.max(...l.map((q) => q.mult)); } catch (e) {}
+  app.innerHTML = `<section class="welcome">
+    <div class="neon" aria-label="Herna vědomostí">Herna<br>vědomostí</div>
+    ${SLOT_SVG}
+    <p class="tagline">Vsaď na své znalosti. Kdo prohraje všechno, končí.</p>
+    <div class="facts">
+      <div class="fact"><b>1 000</b><span>žetonů na začátek</span></div>
+      <div class="fact"><b>${nQ || "?"}</b><span>otázek</span></div>
+      <div class="fact hot"><b>${maxM ? fmtMult(maxM) : "×?"}</b><span>jackpot</span></div>
     </div>
     ${msg ? `<p class="err">${esc(msg)}</p>` : ""}
-    ${linkedQ ? `<p style="color:var(--win);font-weight:700">Otázky jsou načtené z odkazu. Stačí vytvořit místnost.</p>` : ""}
-    <div class="row"><button class="primary" id="create" type="button">Vytvořit místnost</button>${linkedQ ? "" : `<button class="ghost" id="saveLink" type="button">Uložit otázky pod tajný odkaz</button>`}</div>
-    <p class="muted small" id="linkOut"></p>
-  </div>`;
+    <button class="primary huge" id="create" type="button">Otevřít hernu</button>
+    <details class="admin" ${nQ ? "" : "open"}>
+      <summary>Nastavení hry</summary>
+      <div class="row" style="margin-top:12px">
+        <label class="row" for="minBet">Minimální sázka <input id="minBet" type="number" min="1" step="10" value="50" style="width:110px"></label>
+        <label class="row" for="dur">Čas na otázku (s) <input id="dur" type="number" min="10" step="5" value="30" style="width:110px"></label>
+      </div>
+      <div ${linkedQ ? "hidden" : ""} style="display:grid;gap:10px;margin-top:14px">
+        <p class="muted small">Otázky: vlož obsah souboru otazky.json nebo ho vyber.</p>
+        <input type="file" id="file" accept=".json,application/json">
+        <textarea id="qs" spellcheck="false">${esc(draftQ)}</textarea>
+        <div class="row"><button class="ghost" id="saveLink" type="button">Uložit otázky pod tajný odkaz</button></div>
+        <p class="muted small" id="linkOut"></p>
+      </div>
+    </details>
+  </section>`;
   document.getElementById("file").onchange = async (e) => { const f = e.target.files[0]; if (f) document.getElementById("qs").value = await f.text(); };
-  document.getElementById("create").onclick = createRoom;
+  document.getElementById("create").onclick = () => { unlock(); sfx.jackpot(); createRoom(); };
   const sl = document.getElementById("saveLink");
   if (sl) sl.onclick = async () => {
     const out = document.getElementById("linkOut");
@@ -155,6 +194,7 @@ async function createRoom() {
 
 async function openRoom(c) {
   code = c;
+  document.body.classList.remove("welcome-mode");
   const s = await get(ref(db, `secrets/${c}/questions`));
   questions = s.val();
   info.textContent = `Místnost ${code}`;
