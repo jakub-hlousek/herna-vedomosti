@@ -6,7 +6,7 @@
 <title>Herna vědomostí · projektor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@700&family=Public+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=13">
+<link rel="stylesheet" href="style.css?v=14">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 </head>
 <body>
@@ -19,8 +19,8 @@
   <main id="app"><p class="muted">Načítám…</p></main>
 </div>
 <script type="module">
-import { db, ref, get, set, update, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, serverNow } from "./common.js?v=13";
-import { sfx, unlock, isMuted, setMuted, coinRain, startMusic, stopMusic } from "./sfx.js?v=13";
+import { db, ref, get, set, update, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, serverNow } from "./common.js?v=14";
+import { sfx, unlock, isMuted, setMuted, coinRain, startMusic, stopMusic } from "./sfx.js?v=14";
 let musicWanted = true;
 try { musicWanted = localStorage.getItem("herna-music") !== "0"; } catch (e) {}
 function syncMusic() { if (musicWanted && state && state.phase !== "final") startMusic(); else stopMusic(); }
