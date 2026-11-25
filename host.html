@@ -6,7 +6,7 @@
 <title>Herna vědomostí · projektor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@700&family=Public+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=10">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 </head>
 <body>
@@ -19,8 +19,8 @@
   <main id="app"><p class="muted">Načítám…</p></main>
 </div>
 <script type="module">
-import { db, ref, get, set, update, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, serverNow } from "./common.js";
-import { sfx, unlock, isMuted, setMuted, coinRain } from "./sfx.js";
+import { db, ref, get, set, update, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, serverNow } from "./common.js?v=10";
+import { sfx, unlock, isMuted, setMuted, coinRain } from "./sfx.js?v=10";
 
 document.addEventListener("pointerdown", unlock);
 document.addEventListener("keydown", unlock);
@@ -262,7 +262,7 @@ async function reveal() {
       let amount, choice, win = false, delta, auto = false;
       if (bet && bet.amount >= 1 && bet.amount <= p.chips) {
         amount = Math.round(bet.amount); choice = bet.choice; win = choice === q.correct;
-        delta = win ? Math.round(amount * q.mult) - amount : -amount;
+        delta = win ? Math.round(amount * q.mult) : -amount;
       } else {
         auto = true; amount = Math.min(state.minBet, p.chips); choice = -1; delta = -amount;
       }
@@ -301,7 +301,7 @@ function render() {
       <div class="card" style="display:grid;gap:18px">
         <p class="muted">Naskenuj QR kód, nebo otevři stránku a zadej kód místnosti</p>
         <div class="code">${esc(code)}</div>
-        <p><b>Pravidla:</b> každý začíná s 1 000 žetony. U každé otázky vsadíš část žetonů na jednu odpověď. Správně = sázka × násobitel otázky. Špatně = sázka je pryč. Kdo nevsadí, ztratí minimální sázku ${fmt(st.minBet)}. Kdo spadne na nulu, zbankrotoval a dál jen sleduje.</p>
+        <p><b>Pravidla:</b> každý začíná s 1 000 žetony. U každé otázky vsadíš část žetonů na jednu odpověď. Správně = získáš navíc sázku × násobitel otázky. Špatně = sázka je pryč. Kdo nevsadí, ztratí minimální sázku ${fmt(st.minBet)}. Kdo spadne na nulu, zbankrotoval a dál jen sleduje.</p>
         <h3 style="font-size:22px">Ve hře: ${n}</h3>
         <div class="nicks">${Object.values(players).map((p) => `<span class="nick">${esc(p.nick)}</span>`).join("") || `<span class="muted">Zatím nikdo</span>`}</div>
         <div class="row"><button class="primary" id="startBtn" type="button" ${n ? "" : "disabled"}>Spustit hru</button></div>
@@ -342,7 +342,7 @@ function render() {
   app.innerHTML = `<div class="machine"><div class="marquee" aria-hidden="true"></div><div class="screen">
     <div class="multwrap">
       <div class="multbig ${cur.jackpot ? "jack" : ""} ${fx.spinning ? "spin" : "landed"}" id="multBig" aria-label="Násobitel ${fmtMult(cur.mult)}">${multTxt}</div>
-      <div class="multcap">${cur.jackpot ? `<span class="jackbanner">JACKPOT</span>` : "Násobitel sázky"}<b>Vsaď 200, vyhraj ${fmt(example)}</b><span class="muted" style="text-transform:none;letter-spacing:0">Otázka ${st.q + 1} z ${st.total}</span></div>
+      <div class="multcap">${cur.jackpot ? `<span class="jackbanner">JACKPOT</span>` : "Násobitel sázky"}<b>Vsaď 200, získej +${fmt(example)}</b><span class="muted" style="text-transform:none;letter-spacing:0">Otázka ${st.q + 1} z ${st.total}</span></div>
     </div>
     <p class="qtext">${esc(cur.text)}</p>
     <div class="opts">${opts}</div>

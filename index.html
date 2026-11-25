@@ -6,7 +6,7 @@
 <title>Herna vědomostí</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@700&family=Public+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 <main class="phone" id="app"><p class="muted">Načítám…</p></main>
@@ -18,8 +18,8 @@
   </div>
 </div>
 <script type="module">
-import { db, ref, get, set, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, START_CHIPS } from "./common.js";
-import { coinRain } from "./sfx.js";
+import { db, ref, get, set, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, START_CHIPS } from "./common.js?v=10";
+import { coinRain } from "./sfx.js?v=10";
 let celebrated = null;
 function celebrate(r) {
   if (!r || celebrated === currentKey) return;
@@ -163,14 +163,14 @@ function betForm(head, cur) {
     <div class="betnum" id="amtOut">${fmt(draft.amount)}</div>
     <input id="amt" type="range" min="${min}" max="${chips}" step="${chips - min >= 10 ? 10 : 1}" value="${draft.amount}">
     <div class="quick"><button type="button" data-f="0">Min</button><button type="button" data-f=".25">25 %</button><button type="button" data-f=".5">50 %</button><button type="button" data-f="1">Vše</button></div>
-    <p class="winpreview" id="winOut">Vyhraj až ${fmt(win)}!</p>
+    <p class="winpreview" id="winOut">Vyhraj +${fmt(win)}! (budeš mít ${fmt(chips + win)})</p>
     ${error ? `<p class="err">${esc(error)}</p>` : ""}
     <button class="primary" type="button" id="betBtn" ${draft.choice === null ? "disabled" : ""}>${draft.choice === null ? "Vyber odpověď" : `${myBet ? "Změnit sázku" : "Vsadit"}: ${fmt(draft.amount)} na ${LETTERS[draft.choice]}`}</button>
     ${myBet ? `<p class="small" style="color:var(--win);font-weight:700;text-align:center">Přijato: ${fmt(myBet.amount)} na ${LETTERS[myBet.choice]}</p>` : ""}
   </div>`;
   app.querySelectorAll("[data-c]").forEach((b) => b.onclick = () => { draft.choice = +b.dataset.c; render(); });
   const amt = document.getElementById("amt");
-  amt.oninput = () => { draft.amount = +amt.value; document.getElementById("amtOut").textContent = fmt(draft.amount); const w = Math.round(draft.amount * cur.mult); document.getElementById("winOut").textContent = `Vyhraj až ${fmt(w)}!`; const bb = document.getElementById("betBtn"); if (draft.choice !== null) bb.textContent = `${myBet ? "Změnit sázku" : "Vsadit"}: ${fmt(draft.amount)} na ${LETTERS[draft.choice]}`; };
+  amt.oninput = () => { draft.amount = +amt.value; document.getElementById("amtOut").textContent = fmt(draft.amount); const w = Math.round(draft.amount * cur.mult); document.getElementById("winOut").textContent = `Vyhraj +${fmt(w)}! (budeš mít ${fmt(chips + w)})`; const bb = document.getElementById("betBtn"); if (draft.choice !== null) bb.textContent = `${myBet ? "Změnit sázku" : "Vsadit"}: ${fmt(draft.amount)} na ${LETTERS[draft.choice]}`; };
   app.querySelectorAll("[data-f]").forEach((b) => b.onclick = () => { const f = +b.dataset.f; draft.amount = f === 0 ? min : Math.max(min, f === 1 ? chips : Math.floor(chips * f / 10) * 10); render(); });
   document.getElementById("betBtn").onclick = async () => {
     if (draft.choice === null) return;
