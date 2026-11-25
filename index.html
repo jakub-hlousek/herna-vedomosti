@@ -6,7 +6,7 @@
 <title>Herna vědomostí</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@700&family=Public+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 <main class="phone" id="app"><p class="muted">Načítám…</p></main>
@@ -18,8 +18,17 @@
   </div>
 </div>
 <script type="module">
-import { db, ref, get, set, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, START_CHIPS } from "./common.js?v=10";
-import { coinRain } from "./sfx.js?v=10";
+import { db, ref, get, set, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, START_CHIPS, serverNow } from "./common.js?v=12";
+const SPIN_MS = 1600, SPIN_VALS = [1.5, 2, 2.5, 3, 4, 5, 10, 25, 50, 100];
+let spinning = false, spinIv = null;
+function startSpin() {
+  const left = SPIN_MS - (serverNow() - (state.startedAt || 0));
+  if (left <= 0 || left > SPIN_MS + 500) return;
+  spinning = true; clearInterval(spinIv);
+  spinIv = setInterval(() => { const el = document.getElementById("mobMult"); if (el) el.textContent = fmtMult(SPIN_VALS[Math.floor(Math.random() * SPIN_VALS.length)]); }, 70);
+  setTimeout(() => { clearInterval(spinIv); spinning = false; try { navigator.vibrate?.(40); } catch (e) {} render(); }, left);
+}
+import { coinRain } from "./sfx.js?v=12";
 let celebrated = null;
 function celebrate(r) {
   if (!r || celebrated === currentKey) return;
@@ -68,6 +77,7 @@ function watchQuestion() {
   const key = state?.qKey || null;
   if (key === currentKey) return;
   currentKey = key; myBet = null; myResult = null; draft = { choice: null, amount: null }; error = "";
+  if (key && state.phase === "question") startSpin();
   if (offBet) offBet(); if (offRes) offRes();
   if (!key) return;
   offBet = onValue(ref(db, `rooms/${code}/bets/${key}/${uid}`), (s) => { myBet = s.val(); render(); });
@@ -112,7 +122,8 @@ function render() {
     return;
   }
   const cur = st.current || {};
-  const head = `${spect}<div class="mobmult"><div class="multbig ${cur.jackpot ? "jack" : ""}" aria-label="Násobitel ${fmtMult(cur.mult)}">${fmtMult(cur.mult)}</div><div class="multcap" style="text-align:right">${cur.jackpot ? `<span class="jackbanner" style="font-size:30px">JACKPOT</span>` : "Násobitel"}<span class="muted" style="display:block;text-transform:none;letter-spacing:0;font-size:14px">Otázka ${st.q + 1} z ${st.total}</span></div></div><h2 style="font-size:22px;line-height:1.3">${esc(cur.text)}</h2>`;
+  const head = `${spect}<div class="mobmult"><div class="multbig ${cur.jackpot ? "jack" : ""} ${spinning && st.phase === "question" ? "spin" : ""}" id="mobMult" aria-label="Násobitel">${spinning && st.phase === "question" ? "×?" : fmtMult(cur.mult)}</div><div class="multcap" style="text-align:right">${cur.jackpot ? `<span class="jackbanner" style="font-size:30px">JACKPOT</span>` : "Násobitel"}<span class="muted" style="display:block;text-transform:none;letter-spacing:0;font-size:14px">Otázka ${st.q + 1} z ${st.total}</span></div></div><h2 style="font-size:22px;line-height:1.3">${esc(cur.text)}</h2>`;
+  if (st.phase === "question" && spinning) { app.innerHTML = bar() + head + `<div class="big"><div><h2>Točí se násobitel…</h2><p class="muted">Sázet můžeš, až se zastaví.</p></div></div>`; return; }
   if (st.phase === "question") {
     if (p.bankrupt) { app.innerHTML = bar() + head + optionList(cur, null) + `<p class="muted" style="margin-top:14px">Zbývá <b id="tleft">${secondsLeft(st)}</b> s</p>`; return; }
     return betForm(head, cur);
@@ -126,7 +137,7 @@ function render() {
     let box;
     if (p.bankrupt && !r) box = `<div class="big"><div><p class="muted">Správně bylo ${LETTERS[st.correct]}: ${esc(cur.options?.[st.correct])}</p></div></div>`;
     else if (!r) box = `<div class="big"><div><h2>Vyhodnocuji…</h2></div></div>`;
-    else if (r.win) box = `<div class="big win"><div><div class="icon">+${fmt(r.delta)}</div><h2>Správně!</h2><p class="muted">Vsadil/a jsi ${fmt(r.amount)} na ${LETTERS[r.choice]}.</p></div></div>`;
+    else if (r.win) box = `<div class="big win"><div><div class="icon">+${fmt(r.delta)}</div><h2>Správně!</h2><p class="muted">Vsadil/a jsi ${fmt(r.amount)} na ${LETTERS[r.choice]} a dostal/a jsi zpět ${fmt(r.amount + r.delta)}.</p></div></div>`;
     else box = `<div class="big lose"><div><div class="icon">−${fmt(-r.delta)}</div><h2>${r.auto ? "Nevsadil/a jsi" : "Špatně"}</h2><p class="muted">Správně bylo ${LETTERS[st.correct]}: ${esc(cur.options?.[st.correct])}</p></div></div>`;
     app.innerHTML = bar() + spect + box;
     if (r) celebrate(r);
@@ -163,14 +174,14 @@ function betForm(head, cur) {
     <div class="betnum" id="amtOut">${fmt(draft.amount)}</div>
     <input id="amt" type="range" min="${min}" max="${chips}" step="${chips - min >= 10 ? 10 : 1}" value="${draft.amount}">
     <div class="quick"><button type="button" data-f="0">Min</button><button type="button" data-f=".25">25 %</button><button type="button" data-f=".5">50 %</button><button type="button" data-f="1">Vše</button></div>
-    <p class="winpreview" id="winOut">Vyhraj +${fmt(win)}! (budeš mít ${fmt(chips + win)})</p>
+    <p class="winpreview" id="winOut">Trefíš? Dostaneš ${fmt(win)} žetonů (zisk +${fmt(win - draft.amount)})</p>
     ${error ? `<p class="err">${esc(error)}</p>` : ""}
     <button class="primary" type="button" id="betBtn" ${draft.choice === null ? "disabled" : ""}>${draft.choice === null ? "Vyber odpověď" : `${myBet ? "Změnit sázku" : "Vsadit"}: ${fmt(draft.amount)} na ${LETTERS[draft.choice]}`}</button>
     ${myBet ? `<p class="small" style="color:var(--win);font-weight:700;text-align:center">Přijato: ${fmt(myBet.amount)} na ${LETTERS[myBet.choice]}</p>` : ""}
   </div>`;
   app.querySelectorAll("[data-c]").forEach((b) => b.onclick = () => { draft.choice = +b.dataset.c; render(); });
   const amt = document.getElementById("amt");
-  amt.oninput = () => { draft.amount = +amt.value; document.getElementById("amtOut").textContent = fmt(draft.amount); const w = Math.round(draft.amount * cur.mult); document.getElementById("winOut").textContent = `Vyhraj +${fmt(w)}! (budeš mít ${fmt(chips + w)})`; const bb = document.getElementById("betBtn"); if (draft.choice !== null) bb.textContent = `${myBet ? "Změnit sázku" : "Vsadit"}: ${fmt(draft.amount)} na ${LETTERS[draft.choice]}`; };
+  amt.oninput = () => { draft.amount = +amt.value; document.getElementById("amtOut").textContent = fmt(draft.amount); const w = Math.round(draft.amount * cur.mult); document.getElementById("winOut").textContent = `Trefíš? Dostaneš ${fmt(w)} žetonů (zisk +${fmt(w - draft.amount)})`; const bb = document.getElementById("betBtn"); if (draft.choice !== null) bb.textContent = `${myBet ? "Změnit sázku" : "Vsadit"}: ${fmt(draft.amount)} na ${LETTERS[draft.choice]}`; };
   app.querySelectorAll("[data-f]").forEach((b) => b.onclick = () => { const f = +b.dataset.f; draft.amount = f === 0 ? min : Math.max(min, f === 1 ? chips : Math.floor(chips * f / 10) * 10); render(); });
   document.getElementById("betBtn").onclick = async () => {
     if (draft.choice === null) return;

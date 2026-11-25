@@ -6,7 +6,7 @@
 <title>Herna vědomostí · projektor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@700&family=Public+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=12">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 </head>
 <body>
@@ -19,15 +19,21 @@
   <main id="app"><p class="muted">Načítám…</p></main>
 </div>
 <script type="module">
-import { db, ref, get, set, update, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, serverNow } from "./common.js?v=10";
-import { sfx, unlock, isMuted, setMuted, coinRain } from "./sfx.js?v=10";
+import { db, ref, get, set, update, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, serverNow } from "./common.js?v=12";
+import { sfx, unlock, isMuted, setMuted, coinRain, startMusic, stopMusic } from "./sfx.js?v=12";
+let musicWanted = true;
+try { musicWanted = localStorage.getItem("herna-music") !== "0"; } catch (e) {}
+function syncMusic() { if (musicWanted && state && state.phase !== "final") startMusic(); else stopMusic(); }
 
-document.addEventListener("pointerdown", unlock);
+document.addEventListener("pointerdown", () => { unlock(); syncMusic(); });
 document.addEventListener("keydown", unlock);
 const SPIN = [1.5, 2, 2.5, 3, 4, 5, 10, 25, 50, 100];
 let fx = { key: null, spinning: false, shown: "", phaseKey: null, lastSec: null, nPlayers: 0 };
-function soundBtn() { return `<button class="ghost soundbtn" id="sndBtn" type="button" aria-label="${isMuted() ? "Zapnout zvuk" : "Vypnout zvuk"}">${isMuted() ? "Zvuk: vyp" : "Zvuk: zap"}</button>`; }
-function bindSound() { const b = document.getElementById("sndBtn"); if (b) b.onclick = () => { unlock(); setMuted(!isMuted()); render(); }; }
+function soundBtn() { return `<button class="ghost soundbtn" id="musBtn" type="button">${musicWanted ? "Hudba: zap" : "Hudba: vyp"}</button>` + `<button class="ghost soundbtn" id="sndBtn" type="button" aria-label="${isMuted() ? "Zapnout zvuk" : "Vypnout zvuk"}">${isMuted() ? "Zvuk: vyp" : "Zvuk: zap"}</button>`; }
+function bindSound() {
+  const b = document.getElementById("sndBtn"); if (b) b.onclick = () => { unlock(); setMuted(!isMuted()); render(); };
+  const m = document.getElementById("musBtn"); if (m) m.onclick = () => { unlock(); musicWanted = !musicWanted; try { localStorage.setItem("herna-music", musicWanted ? "1" : "0"); } catch (e) {} syncMusic(); render(); };
+}
 function startSpin(mult) {
   fx.spinning = true;
   let n = 0;
@@ -57,7 +63,7 @@ function phaseEffects() {
     if (right) { sfx.win(); coinRain(right > 3 ? 70 : 40); } else sfx.lose();
     if (Object.values(players).some((p) => p.bankrupt && p.bankruptQ === state.q)) setTimeout(() => sfx.bankrupt(), 900);
   }, 300);
-  if (state.phase === "final") { sfx.fanfare(); coinRain(90); }
+  if (state.phase === "final") { stopMusic(); sfx.fanfare(); coinRain(90); } else syncMusic();
 }
 
 const SLOT_SVG = `<svg class="slot" viewBox="0 0 420 300" role="img" aria-label="Výherní automat" xmlns="http://www.w3.org/2000/svg">
@@ -132,8 +138,8 @@ async function setup(msg = "") {
     <details class="admin" ${nQ ? "" : "open"}>
       <summary>Nastavení hry</summary>
       <div class="row" style="margin-top:12px">
-        <label class="row" for="minBet">Minimální sázka <input id="minBet" type="number" min="1" step="10" value="50" style="width:110px"></label>
-        <label class="row" for="dur">Čas na otázku (s) <input id="dur" type="number" min="10" step="5" value="30" style="width:110px"></label>
+        <label class="row" for="minBet">Minimální sázka <input id="minBet" type="number" min="1" step="10" value="100" style="width:110px"></label>
+        <label class="row" for="dur">Čas na otázku (s) <input id="dur" type="number" min="10" step="5" value="45" style="width:110px"></label>
       </div>
       <div ${linkedQ ? "hidden" : ""} style="display:grid;gap:10px;margin-top:14px">
         <p class="muted small">Otázky: vlož obsah souboru otazky.json nebo ho vyber.</p>
@@ -175,8 +181,8 @@ async function createRoom() {
   let list;
   try { list = parseQuestions(txt); } catch (e) { return setup("Otázky nejdou načíst: " + e.message); }
   try { localStorage.setItem("herna-host-questions", txt); } catch (e) {}
-  const minBet = Math.max(1, Math.round(+document.getElementById("minBet").value || 50));
-  const durationMs = Math.max(10, Math.round(+document.getElementById("dur").value || 30)) * 1000;
+  const minBet = Math.max(1, Math.round(+document.getElementById("minBet").value || 100));
+  const durationMs = Math.max(10, Math.round(+document.getElementById("dur").value || 45)) * 1000;
   let c = null;
   for (let i = 0; i < 10 && !c; i++) {
     const cand = String(Math.floor(1000 + Math.random() * 9000));
@@ -262,7 +268,7 @@ async function reveal() {
       let amount, choice, win = false, delta, auto = false;
       if (bet && bet.amount >= 1 && bet.amount <= p.chips) {
         amount = Math.round(bet.amount); choice = bet.choice; win = choice === q.correct;
-        delta = win ? Math.round(amount * q.mult) : -amount;
+        delta = win ? Math.round(amount * q.mult) - amount : -amount;
       } else {
         auto = true; amount = Math.min(state.minBet, p.chips); choice = -1; delta = -amount;
       }
@@ -301,7 +307,7 @@ function render() {
       <div class="card" style="display:grid;gap:18px">
         <p class="muted">Naskenuj QR kód, nebo otevři stránku a zadej kód místnosti</p>
         <div class="code">${esc(code)}</div>
-        <p><b>Pravidla:</b> každý začíná s 1 000 žetony. U každé otázky vsadíš část žetonů na jednu odpověď. Správně = získáš navíc sázku × násobitel otázky. Špatně = sázka je pryč. Kdo nevsadí, ztratí minimální sázku ${fmt(st.minBet)}. Kdo spadne na nulu, zbankrotoval a dál jen sleduje.</p>
+        <p><b>Pravidla:</b> každý začíná s 1 000 žetony. U každé otázky vsadíš část žetonů na jednu odpověď. Správně = dostaneš zpět sázku × násobitel (200 na ×1,5 = 300 zpět, zisk +100). Špatně = sázka je pryč. Kdo nevsadí, ztratí minimální sázku ${fmt(st.minBet)}. Kdo spadne na nulu, zbankrotoval a dál jen sleduje.</p>
         <h3 style="font-size:22px">Ve hře: ${n}</h3>
         <div class="nicks">${Object.values(players).map((p) => `<span class="nick">${esc(p.nick)}</span>`).join("") || `<span class="muted">Zatím nikdo</span>`}</div>
         <div class="row"><button class="primary" id="startBtn" type="button" ${n ? "" : "disabled"}>Spustit hru</button></div>
@@ -342,7 +348,7 @@ function render() {
   app.innerHTML = `<div class="machine"><div class="marquee" aria-hidden="true"></div><div class="screen">
     <div class="multwrap">
       <div class="multbig ${cur.jackpot ? "jack" : ""} ${fx.spinning ? "spin" : "landed"}" id="multBig" aria-label="Násobitel ${fmtMult(cur.mult)}">${multTxt}</div>
-      <div class="multcap">${cur.jackpot ? `<span class="jackbanner">JACKPOT</span>` : "Násobitel sázky"}<b>Vsaď 200, získej +${fmt(example)}</b><span class="muted" style="text-transform:none;letter-spacing:0">Otázka ${st.q + 1} z ${st.total}</span></div>
+      <div class="multcap">${cur.jackpot ? `<span class="jackbanner">JACKPOT</span>` : "Násobitel sázky"}<b>Vsadíš 200 → dostaneš ${fmt(example)}</b><span class="muted" style="text-transform:none;letter-spacing:0">Otázka ${st.q + 1} z ${st.total}</span></div>
     </div>
     <p class="qtext">${esc(cur.text)}</p>
     <div class="opts">${opts}</div>
