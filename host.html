@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Herna vědomostí · projektor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@700&family=Public+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <header class="host-top">
+    <h1>Herna vědomostí</h1>
+    <span class="muted" id="info"></span>
+    <div class="row" id="tools"></div>
+  </header>
+  <main id="app"><p class="muted">Načítám…</p></main>
+</div>
+<script type="module">
+import { db, ref, get, set, update, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, serverNow } from "./common.js";
+
+const app = document.getElementById("app");
+const info = document.getElementById("info");
+const tools = document.getElementById("tools");
+let uid, code = null, state = null, players = {}, bets = {}, questions = null, offBets = null, betsKey = null, tick = null, busy = false;
+const KEY = "herna-host-room";
+
+const joinUrl = () => new URL("index.html?r=" + code, location.href).href;
+
+async function start() {
+  uid = (await signIn()).uid;
+  let saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  if (saved) {
+    const h = await get(ref(db, `rooms/${saved}/hostUid`)).catch(() => null);
+    if (h && h.val() === uid) return openRoom(saved);
+  }
+  setup();
+}
+
+function setup(msg = "") {
+  info.textContent = ""; tools.innerHTML = "";
+  let draftQ = "";
+  try { draftQ = localStorage.getItem("herna-host-questions") || ""; } catch (e) {}
+  app.innerHTML = `<div class="card" style="max-width:900px;display:grid;gap:16px">
+    <h2 style="font-size:26px">Nová hra</h2>
+    <p class="muted">Otázky se nenahrávají na web, aby je hráči nemohli najít ve zdrojovém kódu. Vlož obsah souboru <b>otazky.json</b> nebo ho vyber tlačítkem.</p>
+    <input type="file" id="file" accept=".json,application/json">
+    <textarea id="qs" spellcheck="false" placeholder='{"questions":[{"q":"…","options":["…","…"],"correct":0,"mult":1.5}]}'>${esc(draftQ)}</textarea>
+    <div class="row">
+      <label class="row" for="minBet">Minimální sázka <input id="minBet" type="number" min="1" step="10" value="50" style="width:120px"></label>
+      <label class="row" for="dur">Čas na otázku (s) <input id="dur" type="number" min="10" step="5" value="30" style="width:120px"></label>
+    </div>
+    ${msg ? `<p class="err">${esc(msg)}</p>` : ""}
+    <div class="row"><button class="primary" id="create" type="button">Vytvořit místnost</button></div>
+  </div>`;
+  document.getElementById("file").onchange = async (e) => { const f = e.target.files[0]; if (f) document.getElementById("qs").value = await f.text(); };
+  document.getElementById("create").onclick = createRoom;
+}
+
+function parseQuestions(txt) {
+  const data = JSON.parse(txt);
+  const list = Array.isArray(data) ? data : data.questions;
+  if (!Array.isArray(list) || !list.length) throw new Error("Chybí seznam otázek.");
+  return list.map((q, i) => {
+    if (!q.q || !Array.isArray(q.options) || q.options.length < 2 || q.options.length > 6) throw new Error(`Otázka ${i + 1}: chybí text nebo 2–6 odpovědí.`);
+    if (!(q.correct >= 0 && q.correct < q.options.length)) throw new Error(`Otázka ${i + 1}: špatný index správné odpovědi.`);
+    if (!(q.mult > 1)) throw new Error(`Otázka ${i + 1}: násobitel musí být větší než 1.`);
+    return { q: String(q.q), options: q.options.map(String), correct: +q.correct, mult: +q.mult, jackpot: !!q.jackpot };
+  });
+}
+
+async function createRoom() {
+  const txt = document.getElementById("qs").value;
+  let list;
+  try { list = parseQuestions(txt); } catch (e) { return setup("Otázky nejdou načíst: " + e.message); }
+  try { localStorage.setItem("herna-host-questions", txt); } catch (e) {}
+  const minBet = Math.max(1, Math.round(+document.getElementById("minBet").value || 50));
+  const durationMs = Math.max(10, Math.round(+document.getElementById("dur").value || 30)) * 1000;
+  let c = null;
+  for (let i = 0; i < 10 && !c; i++) {
+    const cand = String(Math.floor(1000 + Math.random() * 9000));
+    const ex = await get(ref(db, `rooms/${cand}/hostUid`)).catch(() => null);
+    if (ex && !ex.exists()) c = cand;
+  }
+  if (!c) return setup("Nepodařilo se vytvořit místnost. Zkus to znovu.");
+  try {
+    await set(ref(db, `rooms/${c}`), { hostUid: uid, createdAt: serverTimestamp(), state: { phase: "lobby", total: list.length, minBet, durationMs } });
+    await set(ref(db, `secrets/${c}`), { questions: list });
+  } catch (e) { return setup("Zápis do databáze selhal: " + e.message); }
+  try { localStorage.setItem(KEY, c); } catch (e) {}
+  openRoom(c);
+}
+
+async function openRoom(c) {
+  code = c;
+  const s = await get(ref(db, `secrets/${c}/questions`));
+  questions = s.val();
+  info.textContent = `Místnost ${code}`;
+  onValue(ref(db, `rooms/${code}/state`), (snap) => { state = snap.val(); watchBets(); render(); });
+  onValue(ref(db, `rooms/${code}/players`), (snap) => { players = snap.val() || {}; render(); });
+  clearInterval(tick);
+  tick = setInterval(onTick, 250);
+}
+
+function watchBets() {
+  const k = state?.qKey || null;
+  if (k === betsKey) return;
+  betsKey = k; bets = {};
+  if (offBets) offBets();
+  if (k) offBets = onValue(ref(db, `rooms/${code}/bets/${k}`), (s) => { bets = s.val() || {}; render(); });
+}
+
+const active = () => Object.entries(players).filter(([, p]) => !p.bankrupt);
+
+function onTick() {
+  if (state?.phase !== "question") return;
+  const t = document.getElementById("tleft");
+  const left = secondsLeft(state);
+  if (t) t.textContent = left;
+  const all = active().length > 0 && active().every(([u]) => bets[u]);
+  if (!all) allSince = 0; else if (!allSince) allSince = Date.now();
+  const timeUp = left <= 0 && serverNow() > state.startedAt + state.durationMs + 300;
+  const everyoneIn = all && Date.now() - allSince > 3000;
+  if (timeUp || everyoneIn) lock();
+}
+let allSince = 0;
+
+async function go(phase, extra = {}) { await update(ref(db, `rooms/${code}/state`), { phase, ...extra }); }
+
+async function askQuestion(i) {
+  const q = questions[i];
+  allSince = 0;
+  await go("question", { q: i, qKey: "q" + i, current: { text: q.q, options: q.options, mult: q.mult, jackpot: q.jackpot }, correct: null, startedAt: serverTimestamp() });
+}
+
+async function lock() {
+  if (busy || state?.phase !== "question") return;
+  busy = true;
+  try { await go("locked"); } finally { busy = false; }
+}
+
+async function reveal() {
+  if (busy) return; busy = true;
+  try {
+    const q = questions[state.q];
+    const key = state.qKey;
+    const snap = await get(ref(db, `rooms/${code}/bets/${key}`));
+    const b = snap.val() || {};
+    const upd = {};
+    for (const [u, p] of Object.entries(players)) {
+      if (p.bankrupt) continue;
+      const bet = b[u];
+      let amount, choice, win = false, delta, auto = false;
+      if (bet && bet.amount >= 1 && bet.amount <= p.chips) {
+        amount = Math.round(bet.amount); choice = bet.choice; win = choice === q.correct;
+        delta = win ? Math.round(amount * q.mult) - amount : -amount;
+      } else {
+        auto = true; amount = Math.min(state.minBet, p.chips); choice = -1; delta = -amount;
+      }
+      const chips = Math.max(0, p.chips + delta);
+      upd[`players/${u}/chips`] = chips;
+      if (chips <= 0) { upd[`players/${u}/bankrupt`] = true; upd[`players/${u}/bankruptQ`] = state.q; }
+      upd[`results/${key}/${u}`] = { amount, choice, win, delta, auto, allIn: !auto && amount === p.chips };
+    }
+    upd["state/phase"] = "reveal";
+    upd["state/correct"] = q.correct;
+    await update(ref(db, `rooms/${code}`), upd);
+  } catch (e) { alertBox("Vyhodnocení selhalo: " + e.message); }
+  finally { busy = false; }
+}
+
+function alertBox(msg) { const d = document.createElement("p"); d.className = "err"; d.textContent = msg; app.prepend(d); }
+
+async function next() {
+  const anyActive = active().length > 0;
+  if (state.q + 1 >= state.total || !anyActive) return go("final");
+  askQuestion(state.q + 1);
+}
+
+function setTools(html) { tools.innerHTML = html; }
+
+function render() {
+  if (!state) return;
+  const st = state;
+  const n = Object.keys(players).length;
+  if (st.phase === "lobby") {
+    const qr = qrcode(0, "M"); qr.addData(joinUrl()); qr.make();
+    setTools(`<button class="ghost" id="newGame" type="button">Nová hra</button>`);
+    app.innerHTML = `<div class="lobby">
+      <div class="qrbox">${qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true })}<div class="small">${esc(joinUrl())}</div></div>
+      <div class="card" style="display:grid;gap:18px">
+        <p class="muted">Naskenuj QR kód, nebo otevři stránku a zadej kód místnosti</p>
+        <div class="code">${esc(code)}</div>
+        <p><b>Pravidla:</b> každý začíná s 1 000 žetony. U každé otázky vsadíš část žetonů na jednu odpověď. Správně = sázka × násobitel otázky. Špatně = sázka je pryč. Kdo nevsadí, ztratí minimální sázku ${fmt(st.minBet)}. Kdo spadne na nulu, zbankrotoval a dál jen sleduje.</p>
+        <h3 style="font-size:22px">Ve hře: ${n}</h3>
+        <div class="nicks">${Object.values(players).map((p) => `<span class="nick">${esc(p.nick)}</span>`).join("") || `<span class="muted">Zatím nikdo</span>`}</div>
+        <div class="row"><button class="primary" id="startBtn" type="button" ${n ? "" : "disabled"}>Spustit hru</button></div>
+      </div></div>`;
+    document.getElementById("startBtn").onclick = () => askQuestion(0);
+    document.getElementById("newGame").onclick = newGame;
+    return;
+  }
+  setTools(`<button class="ghost" id="newGame" type="button">Ukončit a nová hra</button>`);
+  document.getElementById("newGame").onclick = newGame;
+  if (st.phase === "final") return finalView();
+  const cur = st.current || {};
+  const counts = cur.options.map(() => 0);
+  Object.values(bets).forEach((b) => { if (counts[b.choice] !== undefined) counts[b.choice]++; });
+  const showRight = st.phase === "reveal";
+  const opts = cur.options.map((o, i) => `<div class="opt ${showRight ? (i === st.correct ? "right" : "wrong") : ""}"><b>${LETTERS[i]}</b><span>${esc(o)}</span>${st.phase !== "question" ? `<span class="cnt">${counts[i]} ×</span>` : ""}</div>`).join("");
+  const betCount = Object.keys(bets).length;
+  const act = active().length;
+  let side = "", buttons = "";
+  if (st.phase === "question") {
+    side = `<div class="row" style="justify-content:space-between"><div><div class="muted small">Zbývá</div><div class="timer" id="tleft">${secondsLeft(st)}</div></div><div style="text-align:right"><div class="muted small">Vsadilo</div><div class="timer">${betCount}/${act}</div></div></div>`;
+    buttons = `<button type="button" id="lockBtn">Zamknout sázky hned</button>`;
+  } else if (st.phase === "locked") {
+    side = `<h3 style="font-size:24px">Sázky zamčeny</h3><p class="muted">Vsadilo ${betCount} z ${act} hráčů.</p>`;
+    buttons = `<button class="primary" type="button" id="revealBtn">Odhalit odpověď</button>`;
+  } else if (st.phase === "reveal") {
+    const res = revealStats();
+    side = `<div class="stats"><div class="stat"><b>${res.right}</b>trefilo</div><div class="stat"><b>${res.wrong}</b>vedle</div><div class="stat"><b>${res.newBroke}</b>nových bankrotů</div></div>`;
+    buttons = `<button class="primary" type="button" id="boardBtn">Žebříček</button>`;
+  } else if (st.phase === "leaderboard") {
+    app.innerHTML = boardView(`Žebříček po otázce ${st.q + 1}`) + `<div class="row" style="margin-top:20px"><button class="primary" type="button" id="nextBtn">${st.q + 1 >= st.total || !act ? "Konečné výsledky" : "Další otázka"}</button></div>`;
+    document.getElementById("nextBtn").onclick = next;
+    return;
+  }
+  app.innerHTML = `<div class="machine"><div class="screen">
+    <div class="row"><span class="pill ${cur.jackpot ? "gold" : "or"}">${cur.jackpot ? "JACKPOT " : ""}Násobitel ${fmtMult(cur.mult)}</span><span class="muted">Otázka ${st.q + 1} z ${st.total}</span></div>
+    <p class="qtext">${esc(cur.text)}</p>
+    <div class="opts">${opts}</div>
+    <div style="margin-top:22px;display:grid;gap:14px">${side}<div class="row">${buttons}</div></div>
+  </div></div>`;
+  const lb = document.getElementById("lockBtn"); if (lb) lb.onclick = lock;
+  const rb = document.getElementById("revealBtn"); if (rb) rb.onclick = reveal;
+  const bb = document.getElementById("boardBtn"); if (bb) bb.onclick = () => go("leaderboard");
+}
+
+function revealStats() {
+  const s = { right: 0, wrong: 0, newBroke: 0 };
+  for (const p of Object.values(players)) { if (p.bankrupt && p.bankruptQ === state.q) s.newBroke++; }
+  Object.values(bets).forEach((b) => { if (b.choice === state.correct) s.right++; else s.wrong++; });
+  return s;
+}
+
+function boardView(title) {
+  const rk = ranking(players);
+  return `<div class="card"><h2 style="font-size:28px;margin-bottom:12px">${esc(title)}</h2><div class="scroll"><table class="board">
+    <thead><tr><th class="n">#</th><th>Hráč</th><th class="n">Žetony</th></tr></thead>
+    <tbody>${rk.slice(0, 12).map((p, i) => `<tr class="${p.bankrupt ? "broke" : ""}"><td class="n">${i + 1}.</td><td>${esc(p.nick)}</td><td class="n">${p.bankrupt ? `bankrot (ot. ${p.bankruptQ + 1})` : fmt(p.chips)}</td></tr>`).join("")}</tbody></table></div>
+    ${rk.length > 12 ? `<p class="muted small">a dalších ${rk.length - 12} hráčů</p>` : ""}</div>`;
+}
+
+async function finalView() {
+  const rk = ranking(players);
+  const [a, b, c] = rk;
+  const step = (p, cls, place) => p ? `<div class="step ${cls}"><div class="place">${place}.</div><div class="who">${esc(p.nick)}</div><div class="pts">${p.bankrupt ? "bankrot" : fmt(p.chips)}</div></div>` : `<div></div>`;
+  const resSnap = await get(ref(db, `rooms/${code}/results`)).catch(() => null);
+  const results = resSnap?.val() || {};
+  let allIn = 0, staked = 0, auto = 0;
+  Object.values(results).forEach((q) => Object.values(q).forEach((r) => { if (r.allIn) allIn++; if (!r.auto) staked += r.amount; else auto++; }));
+  const broke = rk.filter((p) => p.bankrupt).length;
+  app.innerHTML = `<div class="podium">${step(b, "p2", 2)}${step(a, "p1", 1)}${step(c, "p3", 3)}</div>
+  <div class="stats">
+    <div class="stat"><b>${broke} z ${rk.length}</b>zbankrotovalo</div>
+    <div class="stat"><b>${allIn}×</b>někdo vsadil všechno</div>
+    <div class="stat"><b>${fmt(staked)}</b>žetonů celkem vsazeno</div>
+    <div class="stat"><b>${auto}×</b>někdo nestihl vsadit</div>
+  </div>
+  <div class="card"><h2 style="font-size:26px;margin-bottom:12px">Konečné pořadí</h2><div class="scroll"><table class="board">
+    <thead><tr><th class="n">#</th><th>Hráč</th><th class="n">Žetony</th></tr></thead>
+    <tbody>${rk.map((p, i) => `<tr class="${p.bankrupt ? "broke" : ""}"><td class="n">${i + 1}.</td><td>${esc(p.nick)}</td><td class="n">${p.bankrupt ? `bankrot (ot. ${p.bankruptQ + 1})` : fmt(p.chips)}</td></tr>`).join("")}</tbody></table></div>
+    <div class="row" style="margin-top:16px"><button type="button" id="csvBtn">Stáhnout výsledky (CSV)</button></div></div>
+  <div class="reflect"><h3 style="font-size:22px;margin-bottom:8px">K zamyšlení</h3>
+    <p>Lákaly vás vysoké násobitele? Vsadil někdo po prohře víc, aby to „vyhrál zpátky“? Jaké to bylo zbankrotovat a jen se dívat?</p>
+    <p class="muted">Tady rozhodovaly znalosti. U automatu rozhoduje náhoda a dlouhodobě vyhrává herna.</p></div>`;
+  document.getElementById("csvBtn").onclick = () => {
+    const rows = [["poradi", "nick", "zetony", "bankrot_u_otazky"], ...rk.map((p, i) => [i + 1, p.nick, p.bankrupt ? 0 : p.chips, p.bankrupt ? p.bankruptQ + 1 : ""])];
+    const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";")).join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
+    a.download = `herna-vysledky-${code}.csv`; a.click();
+  };
+}
+
+function newGame() {
+  if (!confirm("Ukončit tuhle místnost a připravit novou hru?")) return;
+  try { localStorage.removeItem(KEY); } catch (e) {}
+  location.reload();
+}
+
+start().catch((e) => { app.innerHTML = `<p class="err">Chyba: ${esc(e.message)}</p>`; });
+</script>
+</body>
+</html>

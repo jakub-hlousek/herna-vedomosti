@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Herna vědomostí</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@700&family=Public+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="phone" id="app"><p class="muted">Načítám…</p></main>
+<div class="overlay" id="broke" hidden>
+  <div>
+    <h1>BANKROT</h1>
+    <p>Došly ti žetony. Pro tebe hra skončila, zbytek můžeš sledovat jako divák.</p>
+    <button type="button" id="watchBtn">Sledovat hru</button>
+  </div>
+</div>
+<script type="module">
+import { db, ref, get, set, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, START_CHIPS } from "./common.js";
+
+const app = document.getElementById("app");
+const brokeEl = document.getElementById("broke");
+const params = new URLSearchParams(location.search);
+let code = (params.get("r") || "").replace(/\D/g, "").slice(0, 6);
+let uid, state = null, players = {}, myBet = null, myResult = null, draft = { choice: null, amount: null }, sawBroke = false, error = "";
+let offBet = null, offRes = null, currentKey = null, tick = null;
+
+function me() { return players[uid]; }
+
+async function start() {
+  try { uid = (await signIn()).uid; } catch (e) { app.innerHTML = `<p class="err">Nepodařilo se připojit: ${esc(e.message)}</p>`; return; }
+  try { sawBroke = localStorage.getItem("herna-broke-" + code) === "1"; } catch (e) {}
+  if (!code) return askCode();
+  enterRoom();
+}
+
+function askCode(msg = "") {
+  app.innerHTML = `<h1 style="font-size:34px;margin-bottom:8px">Herna vědomostí</h1>
+  <p class="muted">Zadej kód místnosti z projektoru.</p>
+  <form id="f" class="card" style="display:grid;gap:12px">
+    <label for="codeIn">Kód místnosti</label>
+    <input id="codeIn" type="text" inputmode="numeric" autocomplete="off" maxlength="6" value="${esc(code)}">
+    ${msg ? `<p class="err">${esc(msg)}</p>` : ""}
+    <button class="primary" type="submit">Pokračovat</button>
+  </form>`;
+  document.getElementById("f").onsubmit = (e) => { e.preventDefault(); code = document.getElementById("codeIn").value.replace(/\D/g, ""); history.replaceState(null, "", "?r=" + code); enterRoom(); };
+}
+
+async function enterRoom() {
+  const host = await get(ref(db, `rooms/${code}/hostUid`)).catch(() => null);
+  if (!host || !host.exists()) return askCode("Místnost s tímto kódem neexistuje.");
+  onValue(ref(db, `rooms/${code}/state`), (s) => { state = s.val(); watchQuestion(); render(); });
+  onValue(ref(db, `rooms/${code}/players`), (s) => { players = s.val() || {}; render(); });
+  clearInterval(tick); tick = setInterval(() => { if (state?.phase === "question") updateTimer(); }, 250);
+}
+
+function watchQuestion() {
+  const key = state?.qKey || null;
+  if (key === currentKey) return;
+  currentKey = key; myBet = null; myResult = null; draft = { choice: null, amount: null }; error = "";
+  if (offBet) offBet(); if (offRes) offRes();
+  if (!key) return;
+  offBet = onValue(ref(db, `rooms/${code}/bets/${key}/${uid}`), (s) => { myBet = s.val(); render(); });
+  offRes = onValue(ref(db, `rooms/${code}/results/${key}/${uid}`), (s) => { myResult = s.val(); render(); });
+}
+
+function joinForm() {
+  if (state?.phase !== "lobby") { app.innerHTML = `<div class="big"><div><h2>Hra už běží</h2><p class="muted">Připojit se dá jen před startem hry.</p></div></div>`; return; }
+  app.innerHTML = `<h1 style="font-size:34px;margin-bottom:8px">Herna vědomostí</h1>
+  <p class="muted">Místnost ${esc(code)} · dostaneš ${fmt(START_CHIPS)} žetonů</p>
+  <form id="f" class="card" style="display:grid;gap:12px">
+    <label for="nickIn">Tvůj nick</label>
+    <input id="nickIn" type="text" maxlength="16" autocomplete="off" placeholder="max. 16 znaků">
+    ${error ? `<p class="err">${esc(error)}</p>` : ""}
+    <button class="primary" type="submit">Vstoupit do herny</button>
+  </form>
+  <p class="muted small" style="margin-top:14px">Pod tímhle nickem tě uvidí ostatní na žebříčku, a podle něj se pak počítají body k zápočtu.</p>`;
+  document.getElementById("f").onsubmit = async (e) => {
+    e.preventDefault();
+    const nick = document.getElementById("nickIn").value.trim().slice(0, 16);
+    if (!nick) { error = "Napiš nick."; return joinForm(); }
+    if (Object.values(players).some((p) => (p.nick || "").toLowerCase() === nick.toLowerCase())) { error = "Tenhle nick už někdo má."; return joinForm(); }
+    try { await set(ref(db, `rooms/${code}/players/${uid}`), { nick, chips: START_CHIPS, joinedAt: serverTimestamp() }); error = ""; }
+    catch (err) { error = "Nepodařilo se připojit. Zkus to znovu."; joinForm(); }
+  };
+}
+
+function bar(extra = "") {
+  const p = me();
+  return `<div class="bar"><div><div class="small muted">${esc(p?.nick)}</div>${extra}</div><div class="chips">${p?.bankrupt ? "0" : fmt(p?.chips)} <span class="small muted">žetonů</span></div></div>`;
+}
+
+function render() {
+  if (!uid || !state) return;
+  const p = me();
+  if (!p) return joinForm();
+  if (p.bankrupt && !sawBroke) { brokeEl.hidden = false; } else { brokeEl.hidden = true; }
+  const spect = p.bankrupt ? `<div class="spect">Divák · bankrot</div>` : "";
+  const st = state;
+  if (st.phase === "lobby") {
+    app.innerHTML = bar() + `<div class="big"><div><h2>Jsi ve hře</h2><p class="muted">Čekáme na start. Ve hře je ${Object.keys(players).length} hráčů.</p></div></div>`;
+    return;
+  }
+  const cur = st.current || {};
+  const head = `${spect}<p class="row" style="margin:10px 0 4px"><span class="pill ${cur.jackpot ? "gold" : "or"}">${cur.jackpot ? "JACKPOT " : ""}${fmtMult(cur.mult)}</span><span class="muted small">Otázka ${st.q + 1} z ${st.total}</span></p><h2 style="font-size:22px;line-height:1.3">${esc(cur.text)}</h2>`;
+  if (st.phase === "question") {
+    if (p.bankrupt) { app.innerHTML = bar() + head + optionList(cur, null) + `<p class="muted" style="margin-top:14px">Zbývá <b id="tleft">${secondsLeft(st)}</b> s</p>`; return; }
+    return betForm(head, cur);
+  }
+  if (st.phase === "locked") {
+    app.innerHTML = bar() + head + `<div class="big"><div><h2>Sázky jsou zamčené</h2><p class="muted">${myBet ? `Vsadil/a jsi ${fmt(myBet.amount)} na ${LETTERS[myBet.choice]}.` : p.bankrupt ? "Sleduješ hru." : "Nevsadil/a jsi. Propadne ti minimální sázka."}</p></div></div>`;
+    return;
+  }
+  if (st.phase === "reveal") {
+    const r = myResult;
+    let box;
+    if (p.bankrupt && !r) box = `<div class="big"><div><p class="muted">Správně bylo ${LETTERS[st.correct]}: ${esc(cur.options?.[st.correct])}</p></div></div>`;
+    else if (!r) box = `<div class="big"><div><h2>Vyhodnocuji…</h2></div></div>`;
+    else if (r.win) box = `<div class="big win"><div><div class="icon">+${fmt(r.delta)}</div><h2>Správně!</h2><p class="muted">Vsadil/a jsi ${fmt(r.amount)} na ${LETTERS[r.choice]}.</p></div></div>`;
+    else box = `<div class="big lose"><div><div class="icon">−${fmt(-r.delta)}</div><h2>${r.auto ? "Nevsadil/a jsi" : "Špatně"}</h2><p class="muted">Správně bylo ${LETTERS[st.correct]}: ${esc(cur.options?.[st.correct])}</p></div></div>`;
+    app.innerHTML = bar() + spect + box;
+    return;
+  }
+  if (st.phase === "leaderboard" || st.phase === "final") {
+    const rk = ranking(players);
+    const pos = rk.findIndex((x) => x.uid === uid) + 1;
+    const top = rk.slice(0, 5).map((x, i) => `<tr class="${x.bankrupt ? "broke" : ""}"><td class="n">${i + 1}.</td><td>${esc(x.nick)}${x.uid === uid ? " (ty)" : ""}</td><td class="n">${x.bankrupt ? "bankrot" : fmt(x.chips)}</td></tr>`).join("");
+    app.innerHTML = bar() + spect + `<div class="card" style="margin-top:12px;text-align:center"><p class="muted">${st.phase === "final" ? "Konečné pořadí" : "Průběžně jsi"}</p><div class="code" style="font-size:64px">${pos}.</div><p class="muted">z ${rk.length} hráčů</p></div>
+    <div class="scroll" style="margin-top:16px"><table class="board">${top}</table></div>
+    ${st.phase === "final" ? `<p class="muted" style="margin-top:16px">Hra skončila. Díky za hru!</p>` : ""}`;
+    return;
+  }
+}
+
+function optionList(cur, sel) {
+  return `<div class="choice">${(cur.options || []).map((o, i) => `<button type="button" disabled class="${sel === i ? "sel" : ""}"><b>${LETTERS[i]}</b><span>${esc(o)}</span></button>`).join("")}</div>`;
+}
+
+function betForm(head, cur) {
+  const p = me();
+  const chips = p.chips;
+  const min = Math.min(state.minBet || 1, chips);
+  if (draft.amount === null) draft.amount = myBet ? myBet.amount : min;
+  if (draft.choice === null && myBet) draft.choice = myBet.choice;
+  draft.amount = Math.max(min, Math.min(chips, draft.amount));
+  const win = Math.round(draft.amount * cur.mult);
+  app.innerHTML = bar() + head + `
+  <p class="muted small" style="margin-top:10px">Zbývá <b id="tleft">${secondsLeft(state)}</b> s · sázku můžeš měnit do konce času</p>
+  <div class="choice">${(cur.options || []).map((o, i) => `<button type="button" data-c="${i}" class="${draft.choice === i ? "sel" : ""}"><b>${LETTERS[i]}</b><span>${esc(o)}</span></button>`).join("")}</div>
+  <div class="card" style="display:grid;gap:10px">
+    <label for="amt" class="muted small">Kolik vsadíš? (min. ${fmt(min)})</label>
+    <div class="betnum" id="amtOut">${fmt(draft.amount)}</div>
+    <input id="amt" type="range" min="${min}" max="${chips}" step="${chips - min >= 10 ? 10 : 1}" value="${draft.amount}">
+    <div class="quick"><button type="button" data-f="0">Min</button><button type="button" data-f=".25">25 %</button><button type="button" data-f=".5">50 %</button><button type="button" data-f="1">Vše</button></div>
+    <p class="muted small" id="winOut">Při správné odpovědi dostaneš ${fmt(win)} (čistě +${fmt(win - draft.amount)}).</p>
+    ${error ? `<p class="err">${esc(error)}</p>` : ""}
+    <button class="primary" type="button" id="betBtn" ${draft.choice === null ? "disabled" : ""}>${draft.choice === null ? "Vyber odpověď" : `${myBet ? "Změnit sázku" : "Vsadit"}: ${fmt(draft.amount)} na ${LETTERS[draft.choice]}`}</button>
+    ${myBet ? `<p class="small" style="color:var(--win);font-weight:700;text-align:center">Přijato: ${fmt(myBet.amount)} na ${LETTERS[myBet.choice]}</p>` : ""}
+  </div>`;
+  app.querySelectorAll("[data-c]").forEach((b) => b.onclick = () => { draft.choice = +b.dataset.c; render(); });
+  const amt = document.getElementById("amt");
+  amt.oninput = () => { draft.amount = +amt.value; document.getElementById("amtOut").textContent = fmt(draft.amount); const w = Math.round(draft.amount * cur.mult); document.getElementById("winOut").textContent = `Při správné odpovědi dostaneš ${fmt(w)} (čistě +${fmt(w - draft.amount)}).`; const bb = document.getElementById("betBtn"); if (draft.choice !== null) bb.textContent = `${myBet ? "Změnit sázku" : "Vsadit"}: ${fmt(draft.amount)} na ${LETTERS[draft.choice]}`; };
+  app.querySelectorAll("[data-f]").forEach((b) => b.onclick = () => { const f = +b.dataset.f; draft.amount = f === 0 ? min : Math.max(min, f === 1 ? chips : Math.floor(chips * f / 10) * 10); render(); });
+  document.getElementById("betBtn").onclick = async () => {
+    if (draft.choice === null) return;
+    try { await set(ref(db, `rooms/${code}/bets/${state.qKey}/${uid}`), { choice: draft.choice, amount: draft.amount, at: serverTimestamp() }); error = ""; }
+    catch (e) { error = "Sázku se nepodařilo poslat. Možná už vypršel čas."; render(); }
+  };
+}
+
+function updateTimer() { const t = document.getElementById("tleft"); if (t) t.textContent = secondsLeft(state); }
+
+document.getElementById("watchBtn").onclick = () => { sawBroke = true; try { localStorage.setItem("herna-broke-" + code, "1"); } catch (e) {} brokeEl.hidden = true; render(); };
+start();
+</script>
+</body>
+</html>
