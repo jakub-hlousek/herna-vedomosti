@@ -82,3 +82,5 @@ input[type=range]{width:100%;accent-color:var(--or);height:36px}
 .overlay p{font-size:20px;max-width:28em}
 .overlay button{background:#fff;color:#7a1410;border-color:#fff;margin-top:12px}
 .spect{background:#3a1512;border:1px solid #7a1410;color:#ffb3a8;border-radius:12px;padding:8px 14px;font-weight:800;text-align:center}
+
+.overlay h1{font-size:clamp(44px,15vw,140px);letter-spacing:0}
