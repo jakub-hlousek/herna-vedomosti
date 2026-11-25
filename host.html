@@ -40,10 +40,18 @@ async function start() {
   setup();
 }
 
-function setup(msg = "") {
+const setId = () => (new URLSearchParams(location.hash.slice(1)).get("q") || "").replace(/[^A-Za-z0-9]/g, "");
+let linkedQ = "";
+
+async function setup(msg = "") {
   info.textContent = ""; tools.innerHTML = "";
   let draftQ = "";
   try { draftQ = localStorage.getItem("herna-host-questions") || ""; } catch (e) {}
+  if (setId() && !linkedQ) {
+    const s = await get(ref(db, `questionSets/${setId()}`)).catch(() => null);
+    if (s && s.exists()) linkedQ = JSON.stringify(s.val(), null, 1);
+  }
+  if (linkedQ) draftQ = linkedQ;
   app.innerHTML = `<div class="card" style="max-width:900px;display:grid;gap:16px">
     <h2 style="font-size:26px">Nová hra</h2>
     <p class="muted">Otázky se nenahrávají na web, aby je hráči nemohli najít ve zdrojovém kódu. Vlož obsah souboru <b>otazky.json</b> nebo ho vyber tlačítkem.</p>
@@ -54,10 +62,22 @@ function setup(msg = "") {
       <label class="row" for="dur">Čas na otázku (s) <input id="dur" type="number" min="10" step="5" value="30" style="width:120px"></label>
     </div>
     ${msg ? `<p class="err">${esc(msg)}</p>` : ""}
-    <div class="row"><button class="primary" id="create" type="button">Vytvořit místnost</button></div>
+    ${linkedQ ? `<p style="color:var(--win);font-weight:700">Otázky jsou načtené z odkazu. Stačí vytvořit místnost.</p>` : ""}
+    <div class="row"><button class="primary" id="create" type="button">Vytvořit místnost</button>${linkedQ ? "" : `<button class="ghost" id="saveLink" type="button">Uložit otázky pod tajný odkaz</button>`}</div>
+    <p class="muted small" id="linkOut"></p>
   </div>`;
   document.getElementById("file").onchange = async (e) => { const f = e.target.files[0]; if (f) document.getElementById("qs").value = await f.text(); };
   document.getElementById("create").onclick = createRoom;
+  const sl = document.getElementById("saveLink");
+  if (sl) sl.onclick = async () => {
+    const out = document.getElementById("linkOut");
+    let list;
+    try { list = parseQuestions(document.getElementById("qs").value); } catch (e) { out.textContent = "Otázky nejdou načíst: " + e.message; return; }
+    const id = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(36).padStart(2, "0")).join("").slice(0, 20);
+    try { await set(ref(db, `questionSets/${id}`), { questions: list }); } catch (e) { out.textContent = "Uložení selhalo: " + e.message; return; }
+    history.replaceState(null, "", "#q=" + id);
+    out.textContent = "Uloženo. Tajný odkaz: " + location.href;
+  };
 }
 
 function parseQuestions(txt) {
@@ -292,6 +312,7 @@ function newGame() {
   try { localStorage.removeItem(KEY); } catch (e) {}
   location.reload();
 }
+window.addEventListener("hashchange", () => location.reload());
 
 start().catch((e) => { app.innerHTML = `<p class="err">Chyba: ${esc(e.message)}</p>`; });
 </script>
