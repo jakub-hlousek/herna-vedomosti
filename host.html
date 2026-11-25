@@ -20,6 +20,45 @@
 </div>
 <script type="module">
 import { db, ref, get, set, update, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, serverNow } from "./common.js";
+import { sfx, unlock, isMuted, setMuted, coinRain } from "./sfx.js";
+
+document.addEventListener("pointerdown", unlock);
+document.addEventListener("keydown", unlock);
+const SPIN = [1.5, 2, 2.5, 3, 4, 5, 10, 25, 50, 100];
+let fx = { key: null, spinning: false, shown: "", phaseKey: null, lastSec: null, nPlayers: 0 };
+function soundBtn() { return `<button class="ghost soundbtn" id="sndBtn" type="button" aria-label="${isMuted() ? "Zapnout zvuk" : "Vypnout zvuk"}">${isMuted() ? "Zvuk: vyp" : "Zvuk: zap"}</button>`; }
+function bindSound() { const b = document.getElementById("sndBtn"); if (b) b.onclick = () => { unlock(); setMuted(!isMuted()); render(); }; }
+function startSpin(mult) {
+  fx.spinning = true;
+  let n = 0;
+  const iv = setInterval(() => {
+    const el = document.getElementById("multBig");
+    fx.shown = fmtMult(SPIN[Math.floor(Math.random() * SPIN.length)]);
+    if (el) { el.textContent = fx.shown; el.classList.add("spin"); }
+    sfx.tick();
+    if (++n > 22) {
+      clearInterval(iv);
+      fx.spinning = false; fx.shown = fmtMult(mult);
+      const e2 = document.getElementById("multBig");
+      if (e2) { e2.textContent = fx.shown; e2.classList.remove("spin"); e2.classList.add("landed"); }
+      state?.current?.jackpot ? sfx.jackpot() : sfx.land();
+    }
+  }, 70);
+}
+function phaseEffects() {
+  if (!state) return;
+  const pk = state.phase + ":" + (state.qKey || "");
+  if (pk === fx.phaseKey) return;
+  fx.phaseKey = pk;
+  if (state.phase === "question" && fx.key !== state.qKey) { fx.key = state.qKey; fx.lastSec = null; startSpin(state.current.mult); }
+  if (state.phase === "locked") sfx.lock();
+  if (state.phase === "reveal") setTimeout(() => {
+    const right = Object.values(bets).filter((b) => b.choice === state.correct).length;
+    if (right) { sfx.win(); coinRain(right > 3 ? 70 : 40); } else sfx.lose();
+    if (Object.values(players).some((p) => p.bankrupt && p.bankruptQ === state.q)) setTimeout(() => sfx.bankrupt(), 900);
+  }, 300);
+  if (state.phase === "final") { sfx.fanfare(); coinRain(90); }
+}
 
 const app = document.getElementById("app");
 const info = document.getElementById("info");
@@ -119,8 +158,14 @@ async function openRoom(c) {
   const s = await get(ref(db, `secrets/${c}/questions`));
   questions = s.val();
   info.textContent = `Místnost ${code}`;
-  onValue(ref(db, `rooms/${code}/state`), (snap) => { state = snap.val(); watchBets(); render(); });
-  onValue(ref(db, `rooms/${code}/players`), (snap) => { players = snap.val() || {}; render(); });
+  onValue(ref(db, `rooms/${code}/state`), (snap) => { state = snap.val(); watchBets(); render(); phaseEffects(); });
+  onValue(ref(db, `rooms/${code}/players`), (snap) => {
+    players = snap.val() || {};
+    const n = Object.keys(players).length;
+    if (state?.phase === "lobby" && n > fx.nPlayers) sfx.join();
+    fx.nPlayers = n;
+    render();
+  });
   clearInterval(tick);
   tick = setInterval(onTick, 250);
 }
@@ -139,7 +184,8 @@ function onTick() {
   if (state?.phase !== "question") return;
   const t = document.getElementById("tleft");
   const left = secondsLeft(state);
-  if (t) t.textContent = left;
+  if (t) { t.textContent = left; t.classList.toggle("hot", left <= 5); }
+  if (left <= 5 && left > 0 && left !== fx.lastSec) { fx.lastSec = left; sfx.count(); }
   const all = active().length > 0 && active().every(([u]) => bets[u]);
   if (!all) allSince = 0; else if (!allSince) allSince = Date.now();
   const timeUp = left <= 0 && serverNow() > state.startedAt + state.durationMs + 300;
@@ -208,7 +254,8 @@ function render() {
   const n = Object.keys(players).length;
   if (st.phase === "lobby") {
     const qr = qrcode(0, "M"); qr.addData(joinUrl()); qr.make();
-    setTools(`<button class="ghost" id="newGame" type="button">Nová hra</button>`);
+    setTools(soundBtn() + `<button class="ghost" id="newGame" type="button">Nová hra</button>`);
+    bindSound();
     app.innerHTML = `<div class="lobby">
       <div class="qrbox">${qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true })}<div class="small">${esc(joinUrl())}</div></div>
       <div class="card" style="display:grid;gap:18px">
@@ -223,7 +270,8 @@ function render() {
     document.getElementById("newGame").onclick = newGame;
     return;
   }
-  setTools(`<button class="ghost" id="newGame" type="button">Ukončit a nová hra</button>`);
+  setTools(soundBtn() + `<button class="ghost" id="newGame" type="button">Ukončit a nová hra</button>`);
+  bindSound();
   document.getElementById("newGame").onclick = newGame;
   if (st.phase === "final") return finalView();
   const cur = st.current || {};
@@ -249,8 +297,13 @@ function render() {
     document.getElementById("nextBtn").onclick = next;
     return;
   }
-  app.innerHTML = `<div class="machine"><div class="screen">
-    <div class="row"><span class="pill ${cur.jackpot ? "gold" : "or"}">${cur.jackpot ? "JACKPOT " : ""}Násobitel ${fmtMult(cur.mult)}</span><span class="muted">Otázka ${st.q + 1} z ${st.total}</span></div>
+  const multTxt = fx.spinning ? fx.shown : fmtMult(cur.mult);
+  const example = Math.round(200 * cur.mult);
+  app.innerHTML = `<div class="machine"><div class="marquee" aria-hidden="true"></div><div class="screen">
+    <div class="multwrap">
+      <div class="multbig ${cur.jackpot ? "jack" : ""} ${fx.spinning ? "spin" : "landed"}" id="multBig" aria-label="Násobitel ${fmtMult(cur.mult)}">${multTxt}</div>
+      <div class="multcap">${cur.jackpot ? `<span class="jackbanner">JACKPOT</span>` : "Násobitel sázky"}<b>Vsaď 200, vyhraj ${fmt(example)}</b><span class="muted" style="text-transform:none;letter-spacing:0">Otázka ${st.q + 1} z ${st.total}</span></div>
+    </div>
     <p class="qtext">${esc(cur.text)}</p>
     <div class="opts">${opts}</div>
     <div style="margin-top:22px;display:grid;gap:14px">${side}<div class="row">${buttons}</div></div>
