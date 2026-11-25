@@ -6,7 +6,7 @@
 <title>Herna vědomostí · projektor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@700&family=Public+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=12">
+<link rel="stylesheet" href="style.css?v=13">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 </head>
 <body>
@@ -19,8 +19,8 @@
   <main id="app"><p class="muted">Načítám…</p></main>
 </div>
 <script type="module">
-import { db, ref, get, set, update, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, serverNow } from "./common.js?v=12";
-import { sfx, unlock, isMuted, setMuted, coinRain, startMusic, stopMusic } from "./sfx.js?v=12";
+import { db, ref, get, set, update, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, serverNow } from "./common.js?v=13";
+import { sfx, unlock, isMuted, setMuted, coinRain, startMusic, stopMusic } from "./sfx.js?v=13";
 let musicWanted = true;
 try { musicWanted = localStorage.getItem("herna-music") !== "0"; } catch (e) {}
 function syncMusic() { if (musicWanted && state && state.phase !== "final") startMusic(); else stopMusic(); }
@@ -172,7 +172,8 @@ function parseQuestions(txt) {
     if (!q.q || !Array.isArray(q.options) || q.options.length < 2 || q.options.length > 6) throw new Error(`Otázka ${i + 1}: chybí text nebo 2–6 odpovědí.`);
     if (!(q.correct >= 0 && q.correct < q.options.length)) throw new Error(`Otázka ${i + 1}: špatný index správné odpovědi.`);
     if (!(q.mult > 1)) throw new Error(`Otázka ${i + 1}: násobitel musí být větší než 1.`);
-    return { q: String(q.q), options: q.options.map(String), correct: +q.correct, mult: +q.mult, jackpot: !!q.jackpot };
+    const img = typeof q.img === "string" && /^https:\/\//.test(q.img) ? q.img : null;
+    return { q: String(q.q), options: q.options.map(String), correct: +q.correct, mult: +q.mult, jackpot: !!q.jackpot, img };
   });
 }
 
@@ -192,7 +193,12 @@ async function createRoom() {
   if (!c) return setup("Nepodařilo se vytvořit místnost. Zkus to znovu.");
   try {
     await set(ref(db, `rooms/${c}`), { hostUid: uid, createdAt: serverTimestamp(), state: { phase: "lobby", total: list.length, minBet, durationMs } });
-    await set(ref(db, `secrets/${c}`), { questions: list });
+    const mixed = list.map((q) => {
+      const idx = q.options.map((_, i) => i);
+      for (let k = idx.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [idx[k], idx[j]] = [idx[j], idx[k]]; }
+      return { ...q, options: idx.map((i) => q.options[i]), correct: idx.indexOf(q.correct) };
+    });
+    await set(ref(db, `secrets/${c}`), { questions: mixed });
   } catch (e) { return setup("Zápis do databáze selhal: " + e.message); }
   try { localStorage.setItem(KEY, c); } catch (e) {}
   openRoom(c);
@@ -245,7 +251,7 @@ async function go(phase, extra = {}) { await update(ref(db, `rooms/${code}/state
 async function askQuestion(i) {
   const q = questions[i];
   allSince = 0;
-  await go("question", { q: i, qKey: "q" + i, current: { text: q.q, options: q.options, mult: q.mult, jackpot: q.jackpot }, correct: null, startedAt: serverTimestamp() });
+  await go("question", { q: i, qKey: "q" + i, current: { text: q.q, options: q.options, mult: q.mult, jackpot: q.jackpot, img: q.img || null }, correct: null, startedAt: serverTimestamp() });
 }
 
 async function lock() {
@@ -350,7 +356,7 @@ function render() {
       <div class="multbig ${cur.jackpot ? "jack" : ""} ${fx.spinning ? "spin" : "landed"}" id="multBig" aria-label="Násobitel ${fmtMult(cur.mult)}">${multTxt}</div>
       <div class="multcap">${cur.jackpot ? `<span class="jackbanner">JACKPOT</span>` : "Násobitel sázky"}<b>Vsadíš 200 → dostaneš ${fmt(example)}</b><span class="muted" style="text-transform:none;letter-spacing:0">Otázka ${st.q + 1} z ${st.total}</span></div>
     </div>
-    <p class="qtext">${esc(cur.text)}</p>
+    <div class="qrow"><p class="qtext">${esc(cur.text)}</p>${cur.img ? `<img class="qimg" src="${esc(cur.img)}&w=900&q=70&auto=format&fit=crop" alt="" loading="eager">` : ""}</div>
     <div class="opts">${opts}</div>
     <div style="margin-top:22px;display:grid;gap:14px">${side}<div class="row">${buttons}</div></div>
   </div></div>`;

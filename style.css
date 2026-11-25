@@ -174,3 +174,8 @@ h1{background:linear-gradient(180deg,#fff6cf 0%,var(--gold) 45%,var(--gold2) 100
 .qrbox{background:linear-gradient(180deg,#fff6cf,#ffd24a);border:6px solid #8a5200;box-shadow:0 0 0 4px var(--gold),0 0 60px rgba(255,190,0,.45)}
 .qrbox::before{content:"Naskenuj a vstup do herny";font:700 22px 'Libre Baskerville',Georgia,serif;color:#2a1600}
 @media(prefers-reduced-motion:reduce){.neon,.slot *,.primary.huge{animation:none!important}}
+/* obrázky k otázkám */
+.qrow{display:grid;gap:20px;align-items:center;margin:12px 0 24px}
+.qrow .qtext{margin:0}
+@media(min-width:900px){.qrow{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr)}}
+.qimg{width:100%;height:clamp(180px,30vh,320px);object-fit:cover;border-radius:16px;border:4px solid var(--gold);box-shadow:0 0 30px rgba(255,190,0,.35);background:#0b2a1c}

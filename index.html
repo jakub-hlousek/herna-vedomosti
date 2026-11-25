@@ -6,7 +6,7 @@
 <title>Herna vědomostí</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@700&family=Public+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=12">
+<link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>
 <main class="phone" id="app"><p class="muted">Načítám…</p></main>
@@ -18,7 +18,7 @@
   </div>
 </div>
 <script type="module">
-import { db, ref, get, set, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, START_CHIPS, serverNow } from "./common.js?v=12";
+import { db, ref, get, set, onValue, serverTimestamp, signIn, esc, fmt, fmtMult, LETTERS, secondsLeft, ranking, START_CHIPS, serverNow } from "./common.js?v=13";
 const SPIN_MS = 1600, SPIN_VALS = [1.5, 2, 2.5, 3, 4, 5, 10, 25, 50, 100];
 let spinning = false, spinIv = null;
 function startSpin() {
@@ -28,7 +28,7 @@ function startSpin() {
   spinIv = setInterval(() => { const el = document.getElementById("mobMult"); if (el) el.textContent = fmtMult(SPIN_VALS[Math.floor(Math.random() * SPIN_VALS.length)]); }, 70);
   setTimeout(() => { clearInterval(spinIv); spinning = false; try { navigator.vibrate?.(40); } catch (e) {} render(); }, left);
 }
-import { coinRain } from "./sfx.js?v=12";
+import { coinRain } from "./sfx.js?v=13";
 let celebrated = null;
 function celebrate(r) {
   if (!r || celebrated === currentKey) return;

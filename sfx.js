@@ -16,52 +16,80 @@ export function setMuted(m) {
   if (music && ctx) music.g.gain.setTargetAtTime(m ? 0 : MUSIC_VOL, ctx.currentTime, 0.1);
 }
 
-// Podkresová hudba: smyčka v rytmu lounge kasina (bas, akordy, činely, melodie).
-const MUSIC_VOL = 0.55;
+// Podkresová hudba: swing jako v lounge kasina ve Vegas
+// (kráčející basa, ride činel, hi-hat, klavírní akordy, vibrafon s melodií, žesťové údery).
+const MUSIC_VOL = 0.6;
 let music = null, noise = null;
 const midi = (m) => 440 * Math.pow(2, (m - 69) / 12);
-const CHORDS = [[57, 60, 64, 67], [62, 65, 69, 72], [55, 59, 62, 65], [52, 56, 59, 62]];
-const SCALE = [69, 72, 74, 76, 79, 81, 84];
+// I–VI–ii–V v F dur: Fmaj7 | D7 | Gm7 | C7 | Am7 | D7 | Gm7 | C7
+const PROG = [[53, [0, 4, 7, 11]], [50, [0, 4, 7, 10]], [55, [0, 3, 7, 10]], [48, [0, 4, 7, 10]], [57, [0, 3, 7, 10]], [50, [0, 4, 7, 10]], [55, [0, 3, 7, 10]], [48, [0, 4, 7, 10]]];
+const SCALE = [65, 67, 69, 72, 74, 77, 79, 81];
 export const musicOn = () => !!music;
 export function startMusic() {
   if (!ctx || music) return;
   const g = ctx.createGain();
   g.gain.value = muted ? 0 : MUSIC_VOL;
-  g.connect(ctx.destination);
+  const comp = ctx.createDynamicsCompressor();
+  g.connect(comp).connect(ctx.destination);
   if (!noise) {
-    noise = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.06), ctx.sampleRate);
+    noise = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.4), ctx.sampleRate);
     const d = noise.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
   }
-  const step = 60 / 116 / 2;
-  let i = 0, next = ctx.currentTime + 0.15, lastNote = 69;
-  const play = (f, t, dur, type, vol) => {
+  const beat = 60 / 138, swing = beat * 2 / 3;
+  let b = 0, next = ctx.currentTime + 0.2, mel = 72, phrase = [];
+  const voice = (f, t, dur, type, vol, cutoff = 0, vib = 0) => {
     const o = ctx.createOscillator(), e = ctx.createGain();
     o.type = type; o.frequency.value = f;
+    let node = o;
+    if (cutoff) { const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = cutoff; o.connect(lp); node = lp; }
+    if (vib) { const lfo = ctx.createOscillator(), lg = ctx.createGain(); lfo.frequency.value = 5.5; lg.gain.value = vol * 0.35; lfo.connect(lg).connect(e.gain); lfo.start(t); lfo.stop(t + dur + 0.05); }
     e.gain.setValueAtTime(0.0001, t);
-    e.gain.exponentialRampToValueAtTime(vol, t + 0.012);
+    e.gain.exponentialRampToValueAtTime(vol, t + 0.01);
     e.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(e).connect(g); o.start(t); o.stop(t + dur + 0.05);
+    node.connect(e).connect(g); o.start(t); o.stop(t + dur + 0.05);
   };
-  const hat = (t, vol) => {
+  const metal = (t, vol, dur, freq) => {
     const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), e = ctx.createGain();
-    src.buffer = noise; f.type = "highpass"; f.frequency.value = 7000;
-    e.gain.setValueAtTime(vol, t); e.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
-    src.connect(f).connect(e).connect(g); src.start(t);
+    src.buffer = noise; f.type = "bandpass"; f.frequency.value = freq; f.Q.value = 0.8;
+    e.gain.setValueAtTime(vol, t); e.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f).connect(e).connect(g); src.start(t, Math.random() * 0.2, dur + 0.05);
+  };
+  const kick = (t) => { const o = ctx.createOscillator(), e = ctx.createGain(); o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.12); e.gain.setValueAtTime(0.35, t); e.gain.exponentialRampToValueAtTime(0.0001, t + 0.18); o.connect(e).connect(g); o.start(t); o.stop(t + 0.2); };
+  const newPhrase = (root) => {
+    const p = []; let n = mel;
+    for (let k = 0; k < 6; k++) {
+      const idx = Math.max(0, Math.min(SCALE.length - 1, SCALE.indexOf(n) + [-2, -1, 1, 1, 2][Math.floor(Math.random() * 5)]));
+      n = SCALE[idx]; p.push(n);
+    }
+    mel = n; return p;
   };
   const timer = setInterval(() => {
-    while (next < ctx.currentTime + 0.35) {
-      const s = i % 8, ch = CHORDS[Math.floor(i / 8) % 4];
-      const t = next + (s % 2 ? step * 0.18 : 0);
-      if (s === 0 || s === 3 || s === 4 || s === 6) play(midi(ch[0] - 12 + (s === 4 ? 7 : 0)), t, step * 0.9, "triangle", 0.2);
-      if (s === 2 || s === 5) ch.forEach((m) => play(midi(m), t, step * 0.7, "square", 0.014));
-      if (s % 2 === 0 && Math.random() < 0.5) {
-        const idx = Math.max(0, Math.min(SCALE.length - 1, SCALE.indexOf(lastNote) + Math.floor(Math.random() * 3) - 1));
-        lastNote = SCALE[idx < 0 ? 0 : idx];
-        play(midi(lastNote), t, step * 1.7, "sine", 0.045);
+    while (next < ctx.currentTime + 0.4) {
+      const bar = Math.floor(b / 4), inBar = b % 4, [root, iv] = PROG[bar % 8];
+      const t = next, off = next + swing;
+      // kráčející basa: kořen, terce, kvinta, chromatický přechod k další harmonii
+      const nextRoot = PROG[(bar + 1) % 8][0];
+      const bassNote = [root, root + iv[1], root + 7, nextRoot + (Math.random() < 0.5 ? 1 : -1)][inBar] - 12;
+      voice(midi(bassNote), t, beat * 0.85, "triangle", 0.28, 900);
+      // bicí: ride ding-ding-a-ding, hi-hat na 2 a 4, jemný kopák na 1 a 3
+      metal(t, 0.05, 0.25, 9000);
+      if (inBar === 1 || inBar === 3) { metal(off, 0.035, 0.18, 9000); metal(t, 0.06, 0.05, 6000); }
+      if (inBar === 0 || inBar === 2) kick(t);
+      // klavír: charlestonový rytmus (1 a 2a)
+      if (inBar === 0 || (inBar === 1 && Math.random() < 0.8)) {
+        const ct = inBar === 0 ? t : off;
+        iv.forEach((x) => voice(midi(root + 12 + x), ct, beat * 0.5, "sawtooth", 0.016, 1800));
       }
-      hat(t, s % 2 ? 0.025 : 0.04);
-      next += step; i++;
+      // vibrafon: frázi hraje dva takty, dva takty odpovídá pauzou
+      if (bar % 4 === 0 && inBar === 0) phrase = newPhrase(root);
+      if (bar % 4 < 2 && phrase.length) {
+        const k = (bar % 4) * 4 + inBar;
+        if (k < 6) { voice(midi(phrase[k]), t, beat * 0.9, "sine", 0.07, 0, 1); if (Math.random() < 0.5) voice(midi(phrase[k] + 12), off, beat * 0.4, "sine", 0.03, 0, 1); }
+      }
+      // žesťový úder na konci každých 8 taktů
+      if (bar % 8 === 7 && inBar === 3) [0, 4, 7, 10].forEach((x) => voice(midi(60 + x), off, beat * 0.9, "sawtooth", 0.03, 2400));
+      next += beat; b++;
     }
   }, 100);
   music = { g, timer };
